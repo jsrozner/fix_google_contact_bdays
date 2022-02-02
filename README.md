@@ -12,7 +12,11 @@ contacts.google.com as follows below.
 1. Follow the instructions at [google People API](https://developers.google.com/people/v1/getting-started)
 to enable API access.
    
-2. Set up environment 
+2. Set up environment from pipfile
+
+3. Run `python contacts.py` (nothing will change since `k_do_update` is False)
+
+4. If you like the changes, then set `k_do_update` to `True` in contacts.py
 
 
 ## Code details
@@ -22,10 +26,11 @@ Background:
         includes a year
 
 In particular the following changes are made:
-- if date obj present then
-    - if no year add default year
+- if date obj ({year: , month:, date:}) present then
+    - if no year add default year (defaults to k_default_year == 1900)
     - ignore the bday text (todo: we could verify that it matches)
-- if only text is present then parse the text into a date object
-- ALWAYS remove the text after doing the above
+- if only text is present (no date object) then parse the text into a date object
+    - if no year, default to k_default_year == 1900
+- ALWAYS remove the text object after doing the above
 - anytime a given year is the current year, we assume this is because no year was present (rather than that
     the person was born in current year) and change to the default year
