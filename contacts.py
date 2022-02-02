@@ -13,9 +13,11 @@ from googleapiclient.discovery import build
 
 #############
 ### CONFIG ###
-k_default_year = 1900       # year that will be filled in when no year is present
+k_default_year = 1900  # year that will be filled in when no year is present
+k_do_update = False    # change this when you are ready for the program to actually update birthdays; o.w. is a dry run
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/contacts']       # read/write
+SCOPES = ['https://www.googleapis.com/auth/contacts']  # read/write
+
 #############
 
 
@@ -23,6 +25,7 @@ class PeopleFetcher:
     """
     An iterable to fetch all contacts
     """
+
     def __init__(self, person_fields='names,birthdays', page_size=50):
         self.req_params = dict(
             resourceName='people/me',
@@ -30,8 +33,8 @@ class PeopleFetcher:
             personFields=person_fields,
         )
 
-        self.service = None             # set up by iter
-        self.next_page_token = None     # set in calls to next(); None == first iter call; -1 => stop iteration
+        self.service = None  # set up by iter
+        self.next_page_token = None  # set in calls to next(); None == first iter call; -1 => stop iteration
 
     def setup(self):
         creds = None
@@ -78,17 +81,19 @@ class PeopleFetcher:
         res = self.make_request()
         self.next_page_token = res.get('nextPageToken', None)
         if self.next_page_token is None:
-            self.next_page_token = -1       # stop iteration
+            self.next_page_token = -1  # stop iteration
         return res
 
-Person: Dict
+
+Person = Dict
+
 
 class BirthdayHelper:
     @staticmethod
     def get_people_with_bdays(pf: PeopleFetcher) -> List[Person]:
         total_contacts = 0
         ppl_with_bdays = []
-        for res_list in pf:     # iterate through the API list functionality
+        for res_list in pf:  # iterate through the API list functionality
             people_list = res_list.get('connections', [])
             for p in people_list:
                 if 'birthdays' in p:
@@ -119,40 +124,46 @@ class BirthdayHelper:
         :param ppl_with_bdays: List of Person with birthday field present
         :return: List of Tuple of Person for original, and new with bday updated
         """
-        ppl_to_update : List[Tuple[Person, Person]] = []      # tuple of original new
+        ppl_to_update: List[Tuple[Person, Person]] = []  # tuple of original new
+        err_ct = 0
         for orig_person in ppl_with_bdays:
 
-            p = copy.deepcopy(orig_person)      # the new person we will send to server
+            p = copy.deepcopy(orig_person)  # the new person we will send to server
 
             bdays = p.get('birthdays')
-            assert len(bdays) == 1      # todo support for mult bdays could be added
+            assert len(bdays) == 1  # todo support for mult bdays could be added
             bday = bdays[0]
-            bday_date : Dict = bday.get('date', None)
-            bday_text : str = bday.get('text', None)
+            bday_date: Dict = bday.get('date', None)
+            bday_text: str = bday.get('text', None)
 
             # since there is a bday, we expect that one of these is present
             assert bday_date is not None or bday_text is not None
 
-            did_update = False      # whether we actually made any changes
+            did_update = False  # whether we actually made any changes
 
             if bday_date is not None:
                 bday_year = bday_date.get('year', None)
                 if bday_year is None or bday_year == datetime.now().year:
-                    print('will add fake year')
+                    print('Contact will have fake year added')
                     bday_date.update({'year': k_default_year})
                     did_update = True
-            else:   # bday_date was none, so need to parse text
-                print('parsing bday from bday text')
-                parsed_date : datetime = dateparser.parse(bday_text)
-                print('will used bday parsed from text')
-                pp(f'{bday_text} => {parsed_date}')
-                # if the text did not have a year, then year will be current year (could have timezone issues on dec 31 or 1/1)
-                year_to_use = parsed_date.year if parsed_date.year != datetime.now().year else k_default_year
-                bday_date = {'year': year_to_use,
-                             'month': parsed_date.month,
-                             'day': parsed_date.day}
-                bday.update({'date': bday_date})
-                did_update = True
+            else:  # bday_date was none, so need to parse text
+                print('Contact will have bday parsed from bday text')
+                parsed_date: datetime = dateparser.parse(bday_text)
+                try:
+                    pp(f'{bday_text} => {parsed_date}')
+                    # if the text did not have a year, then year will be current year (could have timezone issues on dec 31 or 1/1)
+                    year_to_use = parsed_date.year if parsed_date.year != datetime.now().year else k_default_year
+                    bday_date = {'year': year_to_use,
+                                 'month': parsed_date.month,
+                                 'day': parsed_date.day}
+                    bday.update({'date': bday_date})
+                    did_update = True
+                except AttributeError:
+                    print(f'Contact with unparseable bday text "{bday_text}". You need to update this contact manually')
+                    pp(p)
+                    err_ct += 1
+                    continue
 
             # now birthdays[0].date has a valid date with default year
             # remove text field bc it is useless
@@ -163,18 +174,21 @@ class BirthdayHelper:
             if did_update:
                 ppl_to_update.append((orig_person, p))
 
+        if err_ct > 0:
+            print(f'Had {err_ct} errors while processing. Please manually update birthdays for printed contacts'
+                  f' via contacts.google.com')
+
+        return ppl_to_update
+
     @staticmethod
-    def update_contact(service, contact_tuple: Tuple[Person, Person], do_update=False):
+    def update_contact(service, contact_tuple: Tuple[Person, Person]):
         orig, new = contact_tuple
         assert orig['resourceName'] == new['resourceName']
-        if do_update:
-            service.people().updateContact(
-                resourceName=orig['resourceName'],
-                updatePersonFields='birthdays',
-                body=new
-            ).execute()
-        else:
-            print('no update bc dry run')
+        service.people().updateContact(
+            resourceName=orig['resourceName'],
+            updatePersonFields='birthdays',
+            body=new
+        ).execute()
 
     ####
     ## Extra helper methods
@@ -207,6 +221,11 @@ class BirthdayHelper:
 
 
 def main():
+    if k_do_update:
+        print('Running with update -> contacts will be updated\n')
+    else:
+        print('Dry run only. Contacts will not be updated. Change k_do_update at top of file if you wish changes to be '
+              'made\n')
     pf = PeopleFetcher()
     ppl_with_bdays = BirthdayHelper.get_people_with_bdays(pf)
     print(f'{len(ppl_with_bdays)} contacts with bdays found')
@@ -215,12 +234,27 @@ def main():
     ppl_to_update = BirthdayHelper.get_people_to_update(ppl_with_bdays)
     print(f'Will potentially update {len(ppl_to_update)} records')
 
-    print('Now printing the contacts that will be changed')
-    pp(ppl_to_update)
-    print('If you accept these changes, then uncomment the line that will update contacts')
-
-    # get the service pointer that is already authorized to do the updates
-    service = pf.service
+    if len(ppl_to_update) > 0:
+        print('Now printing the contacts that will be changed\n ')
+        for orig, new in ppl_to_update:
+            pp(orig)
+            print('\n ============>\n')
+            pp(new)
+            print('\n')
+    else:
+        print('no contacts to update')
+        return
 
     # uncomment the following line when you are ready to update contacts
-    # map(lambda x: BirthdayHelper.update_contact(service, x, do_update=True), ppl_to_update)
+    if k_do_update:
+        print('Now doing updates')
+
+        # get the service pointer that is already authorized to do the updates
+        service = pf.service
+        list(map(lambda x: BirthdayHelper.update_contact(service, x), ppl_to_update))
+    else:
+        print('\n\n\n'
+              'If you accept these changes, then change k_do_update to True at the top of the file\n\n')
+
+if __name__ == '__main__':
+    main()
