@@ -1,5 +1,5 @@
 # Background
-Sometime recently, mac OS and iOS contacts stopped synchronizing
+Sometime recently, mac OS and iOS contact birthdays stopped synchronizing
 with google contacts under various circumstances.
 It appears those circumstances are when a year is missing from the
 bday or when Google has not been able to parse a date object
